@@ -1,0 +1,11 @@
+step by step
+
+1. 
+git add .
+git commit -m "(message)"
+
+2.
+git push
+
+3.
+git pull
