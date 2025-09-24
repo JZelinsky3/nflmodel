@@ -2,7 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 from sklearn.metrics import log_loss, brier_score_loss
-import nfl_data_py as nfl
+from nflreadpy import nflreadr as nfl
 
 # logistic spread to win parameter
 K_SPREAD = 0.13
@@ -24,9 +24,9 @@ def moneyline_to_prob(ml: float) -> float:
 def load_games_and_lines(years):
     """Load schedules and betting lines. Returns merged game level frame."""
     # schedules has scores and participants
-    sched = nfl.import_schedules(years)
+    sched = nfl.load_schedules(years=[2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025])
     # betting lines has open and close for spread and total and moneyline
-    lines = nfl.import_betting_lines(years)
+    lines = nfl.load_betting_lines(years=[...])
 
     # select closing numbers when available
     cols_keep = [
