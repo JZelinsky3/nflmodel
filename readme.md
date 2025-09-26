@@ -96,7 +96,7 @@ off_epa_diff = home_off_epa_roll minus away_off_epa_roll where off_epa_roll is t
 Defensive efficiency difference by EPA allowed
 def_epa_diff = home_def_epa_roll minus away_def_epa_roll where def_epa_allowed_game is negated first so that lower allowed EPA corresponds to better defense, then a 3 game rolling mean is taken.
 
-Engineering details that affect predictions
+## Engineering details that affect predictions
 
 Rolling windows are shifted by one game, so only past games feed each feature.
 
@@ -109,7 +109,7 @@ Any feature that is constant or NaN across the training rows is dropped automati
 
 Optional isotonic calibration is trained on finished games to make predicted probabilities well calibrated. If present, the calibrated column is used for upcoming outputs.
 
-What does not feed the model right now
+## What does not feed the model right now
 
 Totals are loaded but not used as a predictor.
 
