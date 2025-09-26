@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>NFL Model — Weekly Edge Board</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0b1020;
+      --card: #121a33;
+      --ink: #e6edf3;
+      --muted: #9fb3c8;
+      --accent: #6ee7b7;
+      --accent2: #60a5fa;
+      --bad: #fca5a5;
+      --good: #86efac;
+      --border: #223057;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; color: var(--ink); background: linear-gradient(180deg,#0b1020,#0b0f1a 60%); }
+    header { padding: 18px 20px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: rgba(11,16,32,0.9); backdrop-filter: blur(6px); z-index: 5; }
+    h1 { margin: 0 0 6px; font-size: 20px; letter-spacing: .3px; }
+    .sub { color: var(--muted); font-size: 14px; }
+    main { padding: 20px; display: grid; gap: 20px; grid-template-columns: 1fr; max-width: 1200px; margin: 0 auto; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; box-shadow: 0 4px 20px rgba(0,0,0,.25); }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    input[type="number"], input[type="text"] { background: #0f1630; border: 1px solid var(--border); color: var(--ink); padding: 8px 10px; border-radius: 8px; outline: none; }
+    button { background: #1f2b58; border: 1px solid var(--border); color: var(--ink); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+    button:hover { border-color: var(--accent2); }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #1c274a; text-align: left; font-size: 14px; }
+    th { color: var(--muted); user-select: none; cursor: pointer; position: sticky; top: 56px; background: var(--card); z-index: 2; }
+    tr:hover { background: rgba(96,165,250,0.06); }
+    .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+    .pill { position: relative; height: 8px; background: #0f1630; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+    .pill > span { position: absolute; inset: 0 0 0 0; width: 0%; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+    .pill.bad > span { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+    .muted { color: var(--muted); }
+    .two-col { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    @media (min-width: 1024px) { .two-col { grid-template-columns: 1fr 1fr; } }
+    .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>NFL Model — Weekly Edge Board</h1>
+    <div class="sub">Reads your CSVs: <code>upcoming_with_features.csv</code> and <code>pick_board_week_&lt;N&gt;.csv</code>. Click headers to sort, type to filter.</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="row">
+        <div class="tag">Pick board</div>
+        <label>Week
+          <input id="week-input" type="number" min="1" max="22" value="4" style="width:80px;margin-left:8px;">
+        </label>
+        <button id="load-week">Load</button>
+        <input id="filter-picks" type="text" placeholder="Filter (team, matchup, >=edge e.g. edge>3)" style="margin-left:auto; min-width: 240px;">
+      </div>
+      <table id="picks-table">
+        <thead>
+          <tr>
+            <th data-key="week">Week</th>
+            <th data-key="kickoff">Kickoff</th>
+            <th data-key="matchup">Matchup</th>
+            <th data-key="pick_side">Pick</th>
+            <th data-key="edge_num">Edge</th>
+            <th data-key="model_pick_pct">Model%</th>
+            <th data-key="market_pick_pct">Mkt%</th>
+            <th data-key="fair_price_am">Fair ML</th>
+            <th data-key="spread_home">Home Spr</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div id="picks-note" class="note hidden">No pick_board for this week yet. Run <code>python pick_board.py</code> to generate <code>pick_board_week_N.csv</code>.</div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <div class="tag">Upcoming slate</div>
+        <span class="muted">from <code>upcoming_with_features.csv</code></span>
+        <input id="filter-upcoming" type="text" placeholder="Filter (team, week, >=model e.g. model>60)" style="margin-left:auto; min-width: 280px;">
+      </div>
+      <table id="upcoming-table">
+        <thead>
+          <tr>
+            <th data-key="week">Week</th>
+            <th data-key="gameday">Kickoff</th>
+            <th data-key="matchup">Matchup</th>
+            <th data-key="p_market_home">Mkt% H</th>
+            <th data-key="p_model_home">Model% H</th>
+            <th data-key="edge_home">Edge H</th>
+            <th data-key="spread_home">Home Spr</th>
+            <th data-key="total_line_close">Total</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="note">If market % are 50/50, your lines file is missing that game.</div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

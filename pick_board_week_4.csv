@@ -1,0 +1,16 @@
+season,week,kickoff,matchup,spread_home,home_moneyline_close,away_moneyline_close,home_win_prob_market,away_win_prob_market,pick_side,edge,p_model_pick,p_market_pick,fair_price_am,model_col_used
+2025,4,2025-09-29 00:00,CIN @ DEN,,,,50.0,50.0,HOME,45.7,95.7,50.0,-2220,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,BAL @ KC,-2.5,124.0,-148.0,41.9,58.1,HOME,43.6,85.6,41.9,-592,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,TEN @ HOU,7.0,-410.0,320.0,71.3,28.7,HOME,18.7,90.0,71.3,-897,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,CLE @ DET,10.0,-535.0,400.0,78.6,21.4,HOME,11.8,90.4,78.6,-943,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,NO @ BUF,15.5,-1350.0,800.0,88.2,11.8,HOME,11.8,100.0,88.2,-99999900,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,JAX @ SF,3.0,-166.0,140.0,59.6,40.4,AWAY,5.2,45.6,40.4,119,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,PHI @ TB,-3.5,164.0,-198.0,38.8,61.2,AWAY,12.7,73.8,61.2,-282,home_win_prob_model_cal
+2025,4,2025-09-29 00:00,NYJ @ MIA,,,,50.0,50.0,AWAY,14.1,64.1,50.0,-178,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,GB @ DAL,-7.0,285.0,-360.0,28.7,71.3,AWAY,14.5,85.8,71.3,-604,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,LAC @ NYG,-6.0,225.0,-278.0,31.4,68.6,AWAY,18.2,86.8,68.6,-656,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,MIN @ PIT,-2.5,120.0,-142.0,41.9,58.1,AWAY,31.0,89.0,58.1,-810,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,IND @ LA,,,,50.0,50.0,AWAY,39.0,89.0,50.0,-810,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,CHI @ LV,1.5,-112.0,-108.0,54.9,45.1,AWAY,43.9,89.0,45.1,-810,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,WAS @ ATL,1.5,-130.0,110.0,54.9,45.1,AWAY,50.6,95.8,45.1,-2273,home_win_prob_model_cal
+2025,4,2025-09-28 00:00,CAR @ NE,5.5,-238.0,195.0,67.2,32.8,AWAY,54.7,87.5,32.8,-702,home_win_prob_model_cal
