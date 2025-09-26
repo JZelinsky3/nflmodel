@@ -1,0 +1,34 @@
+Week
+Just the NFL week number (1 through 18). Tells you which slate the game belongs to.
+
+Kickoff
+Date and time of the game. Usually UTC or local EST. Useful for sorting, or knowing which games are still upcoming.
+
+Matchup
+The two teams (away @ home). Example: “CAR @ NE”.
+
+Pick
+This is your model’s recommendation. If your model probability for CAR > market probability, then Pick = CAR. It highlights which side has value.
+
+Edge
+The difference between your model’s win probability and the market’s implied probability.
+Example: model 60% vs market 40% → Edge = +20%.
+This is the “betting edge” you’re chasing.
+
+Model%
+Your model’s estimated win probability for the picked team. After adjusting for features like rest days, form, etc.
+
+Mkt%
+The market’s implied win probability, derived from the moneyline (or spread). It’s your baseline prior.
+
+Fair ML
+The “fair” moneyline price based on your model probability.
+Formula:
+
+For a favorite: -100 * (p / (1 - p))
+
+For a dog: +100 * ((1 - p) / p)
+Lets you see whether the sportsbook line is too high or low relative to your model.
+
+Home Spr
+The market spread for the home team (negative = favored). Example: -3.5 means the home team is favored by 3.5 points.
