@@ -103,10 +103,14 @@ const VEHICLES = {
 
 function pickVehicleType(){
   const r = Math.random();
-  if(r < 0.10) return 'sport';
-  if(r < 0.20) return 'tractor';
+  if(r < 0.04) return 'sport';
+  if(r < 0.08) return 'tractor';
   return 'car';
 }
+const VTYPE_COLORS = {
+  sport:   ['#fde047','#fb923c','#ef4444'],   // hot neon — racing colors
+  tractor: ['#65a30d','#854d0e','#a16207'],   // olive / rusty
+};
 
 function rnd(a,b){return a+Math.random()*(b-a);}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
@@ -202,11 +206,12 @@ function spawnCar(dir){
   if(dir==='east')  tx -= offset;
   if(dir==='west')  tx += offset;
   const vtype = pickVehicleType();
-  const tpl = VEHICLES[vtype];
+  const pal = VTYPE_COLORS[vtype] || PALETTE.cars;
+  const color = pal[Math.floor(Math.random()*pal.length)];
   state.approaching.push({
     dir, x:fs.x, y:fs.y, tx, ty,
-    speed: 2.2 * state.speed,
-    color: PALETTE.cars[Math.floor(Math.random()*PALETTE.cars.length)],
+    speed: (vtype==='sport' ? 3.0 : vtype==='tractor' ? 1.6 : 2.2) * state.speed,
+    color,
     vtype,
     done:false,
     headlight: tick,
@@ -277,8 +282,8 @@ function releaseFrontCar(dir){
   cop.targetAngle = COP_ANG[dir];
   cop.signBounce = 0.6;
   addEffect(STOP[dir].x, STOP[dir].y-30, c.vtype==='sport'?'💨':c.vtype==='tractor'?'🐢':'✅');
-  // re-pack queue toward stop line
-  q.forEach((c2,i)=>{ /* visual repositioning handled in draw */ });
+  // cars behind feel relief — shave a chunk off their waitTime
+  q.forEach(c2 => { c2.waitTime = Math.max(0, c2.waitTime * 0.7 - 60); });
   updateUI();
 }
 
@@ -518,10 +523,15 @@ canvas.addEventListener('pointerup',e=>{
   const pos=getPos(e);
   const dx=pos.x-ptrStart.x, dy=pos.y-ptrStart.y, dist=Math.hypot(dx,dy);
   if(dist<12){
-    const side=cwHitTest(ptrStart);
-    if(side){
-      state.cwOpen[side]=!state.cwOpen[side];
-      flash(state.cwOpen[side]?`🟢 ${side.toUpperCase()} WALK`:`🔴 ${side.toUpperCase()} STOP`,'#88ccff');
+    // tap on front car → release; otherwise crosswalk toggle
+    if(swipedCar && swipedCar.index===0){
+      releaseFrontCar(swipedCar.dir);
+    } else {
+      const side=cwHitTest(ptrStart);
+      if(side){
+        state.cwOpen[side]=!state.cwOpen[side];
+        flash(state.cwOpen[side]?`🟢 ${side.toUpperCase()} WALK`:`🔴 ${side.toUpperCase()} STOP`,'#88ccff');
+      }
     }
   } else {
     const sd = Math.abs(dx)>Math.abs(dy) ? (dx>0?'right':'left') : (dy>0?'down':'up');
@@ -531,6 +541,31 @@ canvas.addEventListener('pointerup',e=>{
     }
   }
   ptrStart=null; ptrCur=null; swipedCar=null;
+});
+
+// keyboard controls — arrow key matches the car's direction of travel
+const KEY_TO_DIR = { ArrowUp:'north', ArrowDown:'south', ArrowRight:'east', ArrowLeft:'west' };
+window.addEventListener('keydown', e=>{
+  if(!state) return;
+  if(state.gameOver){
+    if(e.key===' '||e.key==='Enter'){ startGame(); requestAnimationFrame(loop); }
+    return;
+  }
+  const dir = KEY_TO_DIR[e.key];
+  if(dir){
+    e.preventDefault();
+    if(state.queues[dir].length) releaseFrontCar(dir);
+    else flash('No car waiting!','#ff8800');
+    return;
+  }
+  // number keys for crosswalks: 1=top 2=right 3=bottom 4=left
+  const cwMap = {'1':'top','2':'right','3':'bottom','4':'left'};
+  const side = cwMap[e.key];
+  if(side){
+    e.preventDefault();
+    state.cwOpen[side] = !state.cwOpen[side];
+    flash(state.cwOpen[side]?`🟢 ${side.toUpperCase()} WALK`:`🔴 ${side.toUpperCase()} STOP`,'#88ccff');
+  }
 });
 
 // ── drawing ──────────────────────────────────────────────────────────────────
@@ -715,9 +750,17 @@ function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckl
   ctx.fillStyle='rgba(0,0,0,0.45)';
   ctx.fillRect(-cw+1.5, -ch/2+1.5, cw*2, ch);
 
+  // pulsing aura for special vehicles — visible from far away
+  if(!ghost && (vtype==='sport' || vtype==='tractor')){
+    const pulse = 0.55 + 0.45 * Math.sin(tick * (vtype==='sport'?0.25:0.12));
+    ctx.shadowColor = vtype==='sport' ? `rgba(255,220,80,${0.7+pulse*0.3})` : `rgba(180,140,60,${0.6+pulse*0.3})`;
+    ctx.shadowBlur = vtype==='sport' ? 14+pulse*6 : 10+pulse*4;
+  }
+
   // body base
   ctx.fillStyle = color;
   ctx.fillRect(-cw, -ch/2, cw*2, ch);
+  ctx.shadowBlur = 0;
 
   // top/right highlight band (chunky shading)
   ctx.fillStyle='rgba(255,255,255,0.18)';
@@ -804,52 +847,91 @@ function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckl
     ctx.fillRect(cw-1, ch/2-3-wsz, 2, wsz);
   }
 
-  // reckless red glow
+  // bold outline for special types so they stand out
+  if(vtype==='sport'){
+    ctx.strokeStyle='rgba(255,240,120,0.95)'; ctx.lineWidth=1.5;
+    ctx.strokeRect(-cw, -ch/2, cw*2, ch);
+  } else if(vtype==='tractor'){
+    ctx.strokeStyle='rgba(255,200,80,0.85)'; ctx.lineWidth=1.5;
+    ctx.strokeRect(-cw, -ch/2, cw*2, ch);
+  }
   if(reckless){
-    ctx.strokeStyle='rgba(255,60,60,0.8)'; ctx.lineWidth=1.5;
+    ctx.strokeStyle='rgba(255,60,60,0.85)'; ctx.lineWidth=2;
     ctx.strokeRect(-cw, -ch/2, cw*2, ch);
   }
 
   ctx.globalAlpha=1;
   ctx.restore();
 
-  // emotes / labels (outside rotation)
-  if(mood>0.5 && waitTime>60){
-    const EMOTES=['😊','😐','😤','🤬'];
-    ctx.font='14px sans-serif'; ctx.textAlign='center';
-    ctx.fillText(EMOTES[Math.min(3,Math.floor(mood))], cx, cy-32);
-  }
+  // HONK only at high anger (patience bar handles the gradient)
   if(Math.floor(mood)>=2 && waitTime%50<22){
     ctx.fillStyle='rgba(255,80,80,0.95)';
-    ctx.font='bold 8px DM Sans'; ctx.textAlign='center';
-    ctx.fillText('HONK!', cx+(dir==='north'||dir==='south'?20:0), cy-38);
+    ctx.font='bold 9px DM Sans'; ctx.textAlign='center';
+    ctx.fillText('HONK!', cx+(dir==='north'||dir==='south'?22:0), cy-26);
   }
   if(reckless){
     ctx.font='13px sans-serif'; ctx.textAlign='center';
-    ctx.fillText('😈', cx, cy-34);
+    ctx.fillText('😈', cx, cy-28);
   }
+  // big readable type badge for sport/tractor
   if(vtype==='sport' && !ghost){
-    ctx.fillStyle='rgba(255,220,120,0.85)';
-    ctx.font='bold 8px Bebas Neue'; ctx.textAlign='center';
-    ctx.fillText('FAST', cx, cy-32);
+    drawTypeBadge(cx, cy-22, 'FAST', '#fde047', '#1a1a1a');
   }
   if(vtype==='tractor' && !ghost){
-    ctx.fillStyle='rgba(180,140,90,0.95)';
-    ctx.font='bold 8px Bebas Neue'; ctx.textAlign='center';
-    ctx.fillText('SLOW', cx, cy-32);
+    drawTypeBadge(cx, cy-22, 'SLOW', '#a16207', '#fff');
   }
 }
 
+function drawTypeBadge(x, y, label, bg, fg){
+  ctx.font='bold 9px Bebas Neue'; ctx.textAlign='center';
+  const w = ctx.measureText(label).width + 10;
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,0.5)';
+  ctx.beginPath(); ctx.roundRect(x-w/2+1, y-7+1, w, 11, 4); ctx.fill();
+  // pill
+  ctx.fillStyle=bg;
+  ctx.beginPath(); ctx.roundRect(x-w/2, y-7, w, 11, 4); ctx.fill();
+  ctx.fillStyle=fg;
+  ctx.fillText(label, x, y+1);
+}
+
+function drawPatienceBar(x, y, frac){
+  const w = 22, h = 4;
+  // outline
+  ctx.fillStyle='rgba(0,0,0,0.65)';
+  ctx.beginPath(); ctx.roundRect(x-w/2-1, y-h/2-1, w+2, h+2, 2.5); ctx.fill();
+  // empty track
+  ctx.fillStyle='rgba(255,255,255,0.12)';
+  ctx.beginPath(); ctx.roundRect(x-w/2, y-h/2, w, h, 2); ctx.fill();
+  // color by fill %
+  let col;
+  if(frac < 0.33)      col = '#22c55e';
+  else if(frac < 0.66) col = '#facc15';
+  else if(frac < 0.85) col = '#f97316';
+  else                 col = '#ef4444';
+  if(frac > 0.85){
+    const pulse = 0.55 + 0.45 * Math.sin(tick * 0.35);
+    ctx.shadowColor = 'rgba(239,68,68,0.9)';
+    ctx.shadowBlur = 6 * pulse;
+  }
+  ctx.fillStyle = col;
+  const filled = Math.max(0, Math.min(1, frac)) * w;
+  if(filled > 0){
+    ctx.beginPath(); ctx.roundRect(x-w/2, y-h/2, filled, h, 2); ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+}
+
 function drawSwipeArrow(cx,cy,dir){
-  const hints={north:'swipe ↑',south:'swipe ↓',east:'swipe →',west:'swipe ←'};
+  const hints={north:'tap / ↑',south:'tap / ↓',east:'tap / →',west:'tap / ←'};
   const pulse=0.55+0.45*Math.sin(tick*0.14);
   ctx.fillStyle=`rgba(255,255,255,${pulse*0.7})`;
-  ctx.font='bold 11px DM Sans'; ctx.textAlign='center';
+  ctx.font='bold 10px DM Sans'; ctx.textAlign='center';
   let hx=cx,hy=cy;
-  if(dir==='north'){ hy=cy+30; }
-  if(dir==='south'){ hy=cy-26; }
-  if(dir==='east') { hx=cx-36; hy=cy+4; }
-  if(dir==='west') { hx=cx+36; hy=cy+4; }
+  if(dir==='north'){ hy=cy+26; }
+  if(dir==='south'){ hy=cy-20; }
+  if(dir==='east') { hx=cx-38; hy=cy+4; }
+  if(dir==='west') { hx=cx+38; hy=cy+4; }
   ctx.fillText(hints[dir], hx, hy);
 }
 
@@ -864,7 +946,8 @@ function drawQueues(){
       if(dir==='east')  cx -= i*CAR_GAP;
       if(dir==='west')  cx += i*CAR_GAP;
       drawCar(cx,cy,dir,c.color,c.vtype,c.waitTime,c.mood,i>0,false);
-      if(i===0) drawSwipeArrow(cx,cy,dir);
+      drawPatienceBar(cx, cy - 20, c.waitTime / c.patience);
+      if(i===0) drawSwipeArrow(cx,cy+8,dir);
     });
   });
 }
@@ -959,12 +1042,6 @@ function drawPed(x,y,p,walking,panic=0){
 
   ctx.restore();
 
-  // mood emoji
-  if(p.mood>0.5){
-    const PE=['😊','🙂','😤','🏃'];
-    ctx.font='11px sans-serif'; ctx.textAlign='center';
-    ctx.fillText(PE[Math.min(3,Math.floor(p.mood))], x, y-19);
-  }
   if(panic>0.4){
     ctx.font='11px sans-serif'; ctx.textAlign='center';
     ctx.fillText('😱', x, y-19);
@@ -975,6 +1052,7 @@ function drawPeds(){
   state.waiting.forEach(p=>{
     const bob=Math.sin(tick*0.07+p.bob)*1.2;
     drawPed(p.x, p.y+bob, p, false);
+    drawPatienceBar(p.x, p.y - 16, p.waitTime / p.patience);
   });
   state.approachingPeds.forEach(a=>{
     if(a.done) return;
@@ -1147,11 +1225,11 @@ function drawHUD(){
     ctx.fillStyle='rgba(255,180,60,0.85)'; ctx.font='bold 9px DM Sans'; ctx.textAlign='center';
     ctx.fillText('🚜 BLOCKED', CX, 40);
   }
-  if(tick<400){
-    const a=Math.max(0,0.7-tick/400);
+  if(tick<500){
+    const a=Math.max(0,0.7-tick/500);
     ctx.fillStyle=`rgba(255,255,255,${a})`;
     ctx.font='10px DM Sans'; ctx.textAlign='center';
-    ctx.fillText('Swipe a car to release · Tap a crosswalk to open', CX, H-8);
+    ctx.fillText('Click front car or use ←↑↓→ · Tap crosswalk (1234) to open', CX, H-8);
   }
 }
 
