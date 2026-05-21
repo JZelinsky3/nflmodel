@@ -72,11 +72,13 @@ const SPRITE_MANIFEST = {
 
 const Assets = {
   images: {},
+  stacks: {},
   total: 0,
   loaded: 0,
   ready: false,
   has(key){ return !!this.images[key]; },
   get(key){ return this.images[key]; },
+  stack(key){ return this.stacks[key]; },
 };
 
 function loadAssets(manifest, onDone){
@@ -110,6 +112,80 @@ function drawSprite(key, x, y, angle, w, h){
   ctx.drawImage(img, -w/2, -h/2, w, h);
   ctx.restore();
   return true;
+}
+
+// ── sprite-stack vehicles (SpriteStack exports) ───────────────────────────────
+// Each PNG is a horizontal strip of 16px-tall voxel cross-section layers.
+// We bake the 4 travel directions once on load by stacking the layers with a
+// vertical rise + rotation, producing a true 3D toy car that faces each way.
+// Upload the strip PNGs as-is and register them here (no renaming needed).
+const STACK_SCALE = 1.7;   // source px -> screen px
+const STACK_STEP  = 1.5;   // vertical rise per layer (screen px) — more = taller/3D
+const STACK_FRAME = 16;    // source layer width/height
+
+const STACK_MANIFEST = {
+  // red:      'assets/cars/RedCar.png',
+  // blue:     'assets/cars/BlueCar.png',
+  // purple:   'assets/cars/PurpleCar.png',
+  // green:    'assets/cars/GreenCar.png',
+  // yellow:   'assets/cars/YellowCar.png',
+  // greenbig: 'assets/cars/GreenBigCar.png',
+  // redmoto:  'assets/cars/RedMotorcycle.png',
+  // brownmoto:'assets/cars/BrownMotorcycle.png',
+  // whitemoto:'assets/cars/WhiteMotorcycle.png',
+};
+
+// which baked stacks each vehicle type can spawn as (random per car)
+const STACK_POOL = {
+  car:     ['red','blue','purple','green','yellow'],
+  sport:   ['redmoto','whitemoto'],   // motorcycles = the fast type
+  tractor: ['greenbig'],              // biggest body = the slow type
+  reckless:['red','blue','purple','green','yellow'],
+};
+
+function pickStackKey(vtype){
+  const pool = STACK_POOL[vtype] || STACK_POOL.car;
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+
+// bake one heading: stack the layers bottom→top with rise + rotation
+function bakeStackDir(img, angleRad){
+  const fw = STACK_FRAME;
+  const n = Math.max(1, Math.floor(img.width / fw));
+  const size = Math.round(fw * STACK_SCALE);
+  const pad = size;                       // room for rotation + rise
+  const cw = size + pad*2;
+  const ch = size + pad*2 + (n-1)*STACK_STEP;
+  const c = document.createElement('canvas');
+  c.width = cw; c.height = Math.ceil(ch);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const centerX = cw/2;
+  const baseY = c.height - pad - size/2;   // center of bottom layer
+  for(let i=0;i<n;i++){
+    g.save();
+    g.translate(centerX, baseY - i*STACK_STEP);
+    g.rotate(angleRad);
+    g.drawImage(img, i*fw, 0, fw, STACK_FRAME, -size/2, -size/2, size, size);
+    g.restore();
+  }
+  return { canvas:c, ax:centerX, ay:baseY, w:size };
+}
+
+function loadStacks(manifest){
+  Object.entries(manifest).forEach(([key,src])=>{
+    const img = new Image();
+    img.onload = ()=>{
+      Assets.stacks[key] = {
+        north: bakeStackDir(img, CAR_ROT.north),
+        south: bakeStackDir(img, CAR_ROT.south),
+        east:  bakeStackDir(img, CAR_ROT.east),
+        west:  bakeStackDir(img, CAR_ROT.west),
+      };
+    };
+    img.onerror = ()=>console.warn('[stack] could not load', key, src);
+    img.src = src;
+  });
 }
 
 
@@ -293,6 +369,7 @@ function spawnCar(dir){
     speed: (vtype==='sport' ? 3.0 : vtype==='tractor' ? 1.6 : 2.2) * state.speed,
     color,
     vtype,
+    stackKey: pickStackKey(vtype),
     done:false,
     headlight: tick,
   });
@@ -342,6 +419,7 @@ function launchMovingCar(dir, opts){
     speed: baseSpeed,
     color: opts.color,
     vtype,
+    stackKey: opts.stackKey || pickStackKey(opts.reckless ? 'reckless' : vtype),
     reckless: !!opts.reckless,
     done:false,
     trail:[],
@@ -354,7 +432,7 @@ function releaseFrontCar(dir){
   const q=state.queues[dir];
   if(!q.length) return;
   const c=q.shift();
-  launchMovingCar(dir, { vtype:c.vtype, color:c.color });
+  launchMovingCar(dir, { vtype:c.vtype, color:c.color, stackKey:c.stackKey });
   state.score += Math.round(c.mood<1?5:c.mood<2?3:1);
   if(c.vtype==='sport') state.score += 2;     // fast clear bonus
   if(c.vtype==='tractor') state.score += 1;   // patience bonus
@@ -422,7 +500,7 @@ function update(){
       a.done = true;
       if(state.queues[a.dir].length < 3){
         state.queues[a.dir].push({
-          color:a.color, vtype:a.vtype,
+          color:a.color, vtype:a.vtype, stackKey:a.stackKey,
           waitTime:0, patience:rnd(900,1800), mood:0, honkT:0,
         });
       }
@@ -459,7 +537,7 @@ function update(){
       c.mood = Math.min(3, c.waitTime/(c.patience/3));
       if(c.waitTime > c.patience){
         state.queues[dir].splice(i,1);
-        launchMovingCar(dir, { vtype:c.vtype, color:c.color, reckless:true, speedMul:1.5 });
+        launchMovingCar(dir, { vtype:c.vtype, color:c.color, stackKey:c.stackKey, reckless:true, speedMul:1.5 });
         flash('Red runner! 🚗💨','#ff4444');
       }
     }
@@ -820,7 +898,31 @@ function drawCW(side){
 // chunky tile car (Crossy Road meets Prison Architect)
 const DIR_SUFFIX = { north:'n', south:'s', east:'e', west:'w' };
 const SPRITE_SIZE = { car:30, sport:30, tractor:36, reckless:30 };
-function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckless=false){
+function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckless=false,stackKey=null){
+  // ── sprite-stack path (SpriteStack voxel cars, baked per direction) ──
+  const sk = stackKey && Assets.stacks[stackKey];
+  if(sk){
+    const b = sk[dir];
+    ctx.save();
+    if(ghost) ctx.globalAlpha = 0.5;
+    // contact shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(cx, cy, b.w*0.46, b.w*0.22, 0, 0, Math.PI*2); ctx.fill();
+    // special-vehicle / reckless aura
+    if(!ghost && (vtype==='sport' || vtype==='tractor' || reckless)){
+      const pulse = 0.55 + 0.45 * Math.sin(tick * (vtype==='sport'?0.25:0.12));
+      ctx.shadowColor = reckless ? `rgba(255,40,40,${0.7+pulse*0.3})`
+                      : vtype==='sport' ? `rgba(255,220,80,${0.7+pulse*0.3})`
+                      : `rgba(180,140,60,${0.6+pulse*0.3})`;
+      ctx.shadowBlur = vtype==='sport'||reckless ? 14+pulse*6 : 10+pulse*4;
+    }
+    ctx.drawImage(b.canvas, cx-b.ax, cy-b.ay);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+    drawCarOverlays(cx,cy,dir,vtype,waitTime,mood,ghost,reckless);
+    return;
+  }
+
   // ── directional sprite path (8/4-frame packs: one frame per heading, NO rotation) ──
   const ds = DIR_SUFFIX[dir];
   const dirKey = (reckless && Assets.has('reckless_'+ds)) ? 'reckless_'+ds
@@ -1063,7 +1165,7 @@ function drawQueues(){
       if(dir==='south') cy -= i*CAR_GAP;
       if(dir==='east')  cx -= i*CAR_GAP;
       if(dir==='west')  cx += i*CAR_GAP;
-      drawCar(cx,cy,dir,c.color,c.vtype,c.waitTime,c.mood,i>0,false);
+      drawCar(cx,cy,dir,c.color,c.vtype,c.waitTime,c.mood,i>0,false,c.stackKey);
       drawPatienceBar(cx, cy - 20, c.waitTime / c.patience);
       if(i===0) drawSwipeArrow(cx,cy+8,dir);
     });
@@ -1073,7 +1175,7 @@ function drawQueues(){
 function drawApproaching(){
   state.approaching.forEach(a=>{
     if(a.done) return;
-    drawCar(a.x,a.y,a.dir,a.color,a.vtype,0,0,false,false);
+    drawCar(a.x,a.y,a.dir,a.color,a.vtype,0,0,false,false,a.stackKey);
     // headlight cone hint when approaching
     const ang = CAR_ROT[a.dir];
     ctx.save(); ctx.translate(a.x,a.y); ctx.rotate(ang);
@@ -1101,7 +1203,7 @@ function drawMoving(){
       ctx.beginPath(); ctx.moveTo(m.trail[0].x,m.trail[0].y);
       m.trail.forEach(p=>ctx.lineTo(p.x,p.y)); ctx.stroke();
     }
-    drawCar(m.x,m.y,m.dir,m.color,m.vtype,0,0,false,m.reckless);
+    drawCar(m.x,m.y,m.dir,m.color,m.vtype,0,0,false,m.reckless,m.stackKey);
   });
 }
 
@@ -1404,8 +1506,9 @@ function render(){
 }
 
 function loop(){ update(); render(); requestAnimationFrame(loop); }
-// preload any registered sprites, then boot (game runs immediately either way)
+// preload any registered sprites + sprite-stacks, then boot
 loadAssets(SPRITE_MANIFEST, ()=>{ ctx.imageSmoothingEnabled = false; });
+loadStacks(STACK_MANIFEST);
 startGame();
 requestAnimationFrame(loop);
 </script>
