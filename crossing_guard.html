@@ -256,8 +256,9 @@ function unproject(sx,sy){
   const rx=sx-CX, ry=(sy-CY)/ISO_TILT;
   return [ CX + rx*ICOS + ry*ISIN, CY - rx*ISIN + ry*ICOS ];
 }
-// canvas heading per lane so the car sprite points along its (squashed) lane
-const ISO_BAKE = { north:0.988, east:2.154, south:-2.154, west:-0.988 };
+// canvas heading per lane so the car sprite points forward along its diagonal
+// lane (north drives NE, south SW, east SE, west NW on the iso board)
+const ISO_BAKE = { north:Math.PI/4, south:-3*Math.PI/4, east:3*Math.PI/4, west:-Math.PI/4 };
 
 const PALETTE = {
   cars: ['#e84545','#3a86ff','#06d6a0','#f9c74f','#ff6b6b','#a855f7','#f97316','#14b8a6','#ec4899','#84cc16'],
