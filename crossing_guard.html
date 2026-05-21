@@ -32,6 +32,74 @@ body {
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
+ctx.imageSmoothingEnabled = false; // crisp pixels for sprite art
+
+// ── asset pipeline ────────────────────────────────────────────────────────────
+// Drop PNGs into ./assets/ and register them in SPRITE_MANIFEST below.
+// Until a sprite is present, the renderer falls back to the canvas drawing,
+// so the game always runs — sprites "light up" one at a time as you add them.
+//
+// Sprite conventions:
+//  - Top-down, single-facing. Default facing is "up" (toward -Y / north).
+//    If your pack faces another way, set SPRITE_FACING to compensate
+//    (e.g. a right-facing pack = -Math.PI/2).
+//  - Square-ish source (32x32 recommended) keeps rotation anchored cleanly.
+const SPRITE_FACING = 0;
+
+const SPRITE_MANIFEST = {
+  // vehicles — keyed by vtype used in the game
+  // car:     'assets/cars/car.png',
+  // sport:   'assets/cars/sport.png',
+  // tractor: 'assets/cars/tractor.png',
+  // reckless:'assets/cars/reckless.png',
+  // pedestrian (single frame; animation handled later)
+  // ped:     'assets/peds/ped.png',
+  // cop (chibi police, faces up)
+  // cop:     'assets/cop/cop.png',
+};
+
+const Assets = {
+  images: {},
+  total: 0,
+  loaded: 0,
+  ready: false,
+  has(key){ return !!this.images[key]; },
+  get(key){ return this.images[key]; },
+};
+
+function loadAssets(manifest, onDone){
+  const keys = Object.keys(manifest);
+  Assets.total = keys.length;
+  if(!keys.length){ Assets.ready = true; onDone && onDone(); return; }
+  keys.forEach(key=>{
+    const img = new Image();
+    img.onload = ()=>{
+      Assets.images[key] = img;
+      Assets.loaded++;
+      if(Assets.loaded >= Assets.total){ Assets.ready = true; onDone && onDone(); }
+    };
+    img.onerror = ()=>{
+      // missing file → stay on canvas fallback for this key
+      console.warn('[assets] could not load', key, manifest[key]);
+      Assets.loaded++;
+      if(Assets.loaded >= Assets.total){ Assets.ready = true; onDone && onDone(); }
+    };
+    img.src = manifest[key];
+  });
+}
+
+// draw a sprite centered at (x,y), rotated to face travel direction
+function drawSprite(key, x, y, angle, w, h){
+  const img = Assets.images[key];
+  if(!img) return false;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle + SPRITE_FACING);
+  ctx.drawImage(img, -w/2, -h/2, w, h);
+  ctx.restore();
+  return true;
+}
+
 
 // ── layout ───────────────────────────────────────────────────────────────────
 const CX = W/2, CY = H/2 + 10;
@@ -757,6 +825,14 @@ function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckl
     ctx.shadowBlur = vtype==='sport' ? 14+pulse*6 : 10+pulse*4;
   }
 
+  // sprite path: if a PNG is registered for this vtype (or reckless), draw it;
+  // otherwise fall through to the hand-drawn vector car below.
+  const spriteKey = (reckless && Assets.has('reckless')) ? 'reckless' : (Assets.has(vtype) ? vtype : null);
+  if(spriteKey){
+    const dw = cw*2 + 6, dh = ch + 6;          // draw box ~ vehicle footprint
+    ctx.drawImage(Assets.get(spriteKey), -dw/2, -dh/2, dw, dh); // inherits aura glow
+    ctx.shadowBlur = 0;
+  } else {
   // body base
   ctx.fillStyle = color;
   ctx.fillRect(-cw, -ch/2, cw*2, ch);
@@ -859,6 +935,7 @@ function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckl
     ctx.strokeStyle='rgba(255,60,60,0.85)'; ctx.lineWidth=2;
     ctx.strokeRect(-cw, -ch/2, cw*2, ch);
   }
+  } // end vector fallback
 
   ctx.globalAlpha=1;
   ctx.restore();
@@ -989,6 +1066,15 @@ function drawMoving(){
 
 // chunky tile pedestrian
 function drawPed(x,y,p,walking,panic=0){
+  // sprite path: draw the ped PNG upright (peds don't rotate) and bail
+  if(Assets.has('ped')){
+    ctx.fillStyle='rgba(0,0,0,0.32)';
+    ctx.beginPath(); ctx.ellipse(x,y+9,5,2,0,0,Math.PI*2); ctx.fill();
+    const s = 22;
+    ctx.drawImage(Assets.get('ped'), x-s/2, y-s+6, s, s);
+    if(panic>0.4){ ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.fillText('😱', x, y-19); }
+    return;
+  }
   ctx.save(); ctx.translate(x,y);
   // shadow
   ctx.fillStyle='rgba(0,0,0,0.32)';
@@ -1070,8 +1156,20 @@ function drawPeds(){
 }
 
 function drawCop(){
-  ctx.save(); ctx.translate(cop.x,cop.y); ctx.rotate(cop.angle);
   const st=Math.min(1,cop.mood/3);
+  // sprite path: chibi cop PNG, rotated to face the direction being waved through
+  if(Assets.has('cop')){
+    ctx.fillStyle='rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.ellipse(cop.x,cop.y+17,12,5,0,0,Math.PI*2); ctx.fill();
+    const s = 48;
+    drawSprite('cop', cop.x, cop.y, cop.angle, s, s);
+    const ml=['😎 Chill','🙂 Busy','😰 Stressed','🤯 Chaos!'];
+    ctx.fillStyle=`rgba(255,255,255,${0.4+st*0.6})`;
+    ctx.font=`${11+st*2}px DM Sans`; ctx.textAlign='center';
+    ctx.fillText(ml[Math.min(3,Math.floor(cop.mood))], cop.x, cop.y-50);
+    return;
+  }
+  ctx.save(); ctx.translate(cop.x,cop.y); ctx.rotate(cop.angle);
 
   // shadow
   ctx.fillStyle='rgba(0,0,0,0.4)';
@@ -1265,6 +1363,8 @@ function render(){
 }
 
 function loop(){ update(); render(); requestAnimationFrame(loop); }
+// preload any registered sprites, then boot (game runs immediately either way)
+loadAssets(SPRITE_MANIFEST, ()=>{ ctx.imageSmoothingEnabled = false; });
 startGame();
 requestAnimationFrame(loop);
 </script>
