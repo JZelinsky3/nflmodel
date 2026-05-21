@@ -47,15 +47,27 @@ ctx.imageSmoothingEnabled = false; // crisp pixels for sprite art
 const SPRITE_FACING = 0;
 
 const SPRITE_MANIFEST = {
-  // vehicles — keyed by vtype used in the game
-  // car:     'assets/cars/car.png',
-  // sport:   'assets/cars/sport.png',
-  // tractor: 'assets/cars/tractor.png',
-  // reckless:'assets/cars/reckless.png',
-  // pedestrian (single frame; animation handled later)
-  // ped:     'assets/peds/ped.png',
-  // cop (chibi police, faces up)
-  // cop:     'assets/cop/cop.png',
+  // ── DIRECTIONAL vehicles (tilted / 3-4 view packs with a frame per heading) ──
+  // Name each frame <vtype>_<n|s|e|w>. The game picks the frame by travel
+  // direction and does NOT rotate it, so the 3/4 tilt stays correct.
+  //   n = driving up (north)   s = driving down (south)
+  //   e = driving right (east) w = driving left (west)
+  // car_n:'assets/cars/car_n.png',  car_s:'assets/cars/car_s.png',
+  // car_e:'assets/cars/car_e.png',  car_w:'assets/cars/car_w.png',
+  // sport_n:'assets/cars/sport_n.png', sport_s:'assets/cars/sport_s.png',
+  // sport_e:'assets/cars/sport_e.png', sport_w:'assets/cars/sport_w.png',
+  // tractor_n:'assets/cars/tractor_n.png', tractor_s:'assets/cars/tractor_s.png',
+  // tractor_e:'assets/cars/tractor_e.png', tractor_w:'assets/cars/tractor_w.png',
+  // reckless_n:'assets/cars/reckless_n.png', reckless_s:'assets/cars/reckless_s.png',
+  // reckless_e:'assets/cars/reckless_e.png', reckless_w:'assets/cars/reckless_w.png',
+  //
+  // ── OR straight top-down (single frame, code rotates it) ──
+  // car:'assets/cars/car.png',  sport:'...',  tractor:'...',  reckless:'...',
+  //
+  // pedestrian (single frame, drawn upright — peds don't rotate)
+  // ped:'assets/peds/ped.png',
+  // cop (chibi police, faces up — rotates to point at the open lane)
+  // cop:'assets/cop/cop.png',
 };
 
 const Assets = {
@@ -806,7 +818,33 @@ function drawCW(side){
 }
 
 // chunky tile car (Crossy Road meets Prison Architect)
+const DIR_SUFFIX = { north:'n', south:'s', east:'e', west:'w' };
+const SPRITE_SIZE = { car:30, sport:30, tractor:36, reckless:30 };
 function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckless=false){
+  // ── directional sprite path (8/4-frame packs: one frame per heading, NO rotation) ──
+  const ds = DIR_SUFFIX[dir];
+  const dirKey = (reckless && Assets.has('reckless_'+ds)) ? 'reckless_'+ds
+               : (Assets.has(vtype+'_'+ds) ? vtype+'_'+ds : null);
+  if(dirKey){
+    const S = SPRITE_SIZE[vtype] || 30;
+    ctx.save();
+    if(ghost) ctx.globalAlpha = 0.5;
+    // soft contact shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.ellipse(cx, cy+S*0.34, S*0.42, S*0.2, 0, 0, Math.PI*2); ctx.fill();
+    // special-vehicle aura
+    if(!ghost && (vtype==='sport' || vtype==='tractor')){
+      const pulse = 0.55 + 0.45 * Math.sin(tick * (vtype==='sport'?0.25:0.12));
+      ctx.shadowColor = vtype==='sport' ? `rgba(255,220,80,${0.7+pulse*0.3})` : `rgba(180,140,60,${0.6+pulse*0.3})`;
+      ctx.shadowBlur = vtype==='sport' ? 14+pulse*6 : 10+pulse*4;
+    }
+    ctx.drawImage(Assets.get(dirKey), cx-S/2, cy-S/2, S, S);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+    drawCarOverlays(cx,cy,dir,vtype,waitTime,mood,ghost,reckless);
+    return;
+  }
+
   ctx.save();
   ctx.translate(cx,cy);
   ctx.rotate(CAR_ROT[dir]);
@@ -940,7 +978,11 @@ function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckl
   ctx.globalAlpha=1;
   ctx.restore();
 
-  // HONK only at high anger (patience bar handles the gradient)
+  drawCarOverlays(cx,cy,dir,vtype,waitTime,mood,ghost,reckless);
+}
+
+// honk text + type badges, drawn in screen space (shared by sprite & vector paths)
+function drawCarOverlays(cx,cy,dir,vtype,waitTime,mood,ghost,reckless){
   if(Math.floor(mood)>=2 && waitTime%50<22){
     ctx.fillStyle='rgba(255,80,80,0.95)';
     ctx.font='bold 9px DM Sans'; ctx.textAlign='center';
@@ -950,7 +992,6 @@ function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckl
     ctx.font='13px sans-serif'; ctx.textAlign='center';
     ctx.fillText('😈', cx, cy-28);
   }
-  // big readable type badge for sport/tractor
   if(vtype==='sport' && !ghost){
     drawTypeBadge(cx, cy-22, 'FAST', '#fde047', '#1a1a1a');
   }
