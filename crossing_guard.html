@@ -124,15 +124,15 @@ const STACK_STEP  = 2.2;   // vertical rise per layer (screen px) — more = tal
 const STACK_FRAME = 16;    // source layer width/height
 
 const STACK_MANIFEST = {
-  // red:      'assets/cars/RedCar.png',
-  // blue:     'assets/cars/BlueCar.png',
-  // purple:   'assets/cars/PurpleCar.png',
-  // green:    'assets/cars/GreenCar.png',
-  // yellow:   'assets/cars/YellowCar.png',
-  // greenbig: 'assets/cars/GreenBigCar.png',
-  // redmoto:  'assets/cars/RedMotorcycle.png',
-  // brownmoto:'assets/cars/BrownMotorcycle.png',
-  // whitemoto:'assets/cars/WhiteMotorcycle.png',
+  red:      'assets/cars/RedCar.png',
+  blue:     'assets/cars/BlueCar.png',
+  purple:   'assets/cars/PurpleCar.png',
+  green:    'assets/cars/GreenCar.png',
+  yellow:   'assets/cars/YellowCar.png',
+  greenbig: 'assets/cars/GreenBigCar.png',
+  redmoto:  'assets/cars/RedMotorcycle.png',
+  brownmoto:'assets/cars/BrownMotorcycle.png',
+  whitemoto:'assets/cars/WhiteMotorcycle.png',
 };
 
 // which baked stacks each vehicle type can spawn as (random per car)
@@ -177,10 +177,10 @@ function loadStacks(manifest){
     const img = new Image();
     img.onload = ()=>{
       Assets.stacks[key] = {
-        north: bakeStackDir(img, CAR_ROT.north),
-        south: bakeStackDir(img, CAR_ROT.south),
-        east:  bakeStackDir(img, CAR_ROT.east),
-        west:  bakeStackDir(img, CAR_ROT.west),
+        north: bakeStackDir(img, ISO_BAKE.north),
+        south: bakeStackDir(img, ISO_BAKE.south),
+        east:  bakeStackDir(img, ISO_BAKE.east),
+        west:  bakeStackDir(img, ISO_BAKE.west),
       };
     };
     img.onerror = ()=>console.warn('[stack] could not load', key, src);
@@ -241,6 +241,23 @@ const CW_PATH = {
 const SWIPE_DIR = { north:'up', south:'down', east:'right', west:'left' };
 const CAR_ROT   = { north:0, south:Math.PI, east:Math.PI/2, west:-Math.PI/2 };
 const COP_ANG   = { north:-Math.PI/2, south:Math.PI/2, east:0, west:Math.PI };
+
+// ── isometric projection ──────────────────────────────────────────────────────
+// All game LOGIC stays in flat "world" coords. We only project at draw time and
+// unproject at input time. project() = rotate 45° + squash Y (tilt down).
+const BOARD_ROT = Math.PI/4;
+const ISO_TILT  = 0.66;                 // 1 = flat top-down, lower = more tilt
+const ICOS = Math.cos(BOARD_ROT), ISIN = Math.sin(BOARD_ROT);
+function project(x,y){
+  const dx=x-CX, dy=y-CY;
+  return [ CX + dx*ICOS - dy*ISIN, CY + (dx*ISIN + dy*ICOS)*ISO_TILT ];
+}
+function unproject(sx,sy){
+  const rx=sx-CX, ry=(sy-CY)/ISO_TILT;
+  return [ CX + rx*ICOS + ry*ISIN, CY - rx*ISIN + ry*ICOS ];
+}
+// canvas heading per lane so the car sprite points along its (squashed) lane
+const ISO_BAKE = { north:0.988, east:2.154, south:-2.154, west:-0.988 };
 
 const PALETTE = {
   cars: ['#e84545','#3a86ff','#06d6a0','#f9c74f','#ff6b6b','#a855f7','#f97316','#14b8a6','#ec4899','#84cc16'],
@@ -333,6 +350,7 @@ function startGame(){
   cop.angle=COP_ANG.north; cop.targetAngle=COP_ANG.north; cop.mood=0;
   tick=0; updateUI();
   seedDecor();
+  bakeGround();   // re-bake the iso ground (manhole positions come from decor)
 }
 
 function updateUI(){
@@ -642,7 +660,12 @@ function loseLife(){
 }
 
 // ── input ────────────────────────────────────────────────────────────────────
-function getPos(e){ const r=canvas.getBoundingClientRect(); return {x:(e.clientX-r.left)*(W/r.width), y:(e.clientY-r.top)*(H/r.height)}; }
+function getPos(e){
+  const r=canvas.getBoundingClientRect();
+  const sx=(e.clientX-r.left)*(W/r.width), sy=(e.clientY-r.top)*(H/r.height);
+  const [wx,wy]=unproject(sx,sy);   // hit-test in world space
+  return {x:wx, y:wy, sx, sy};
+}
 
 function carHitTest(pos){
   const dirs=['north','south','east','west'];
@@ -727,101 +750,92 @@ window.addEventListener('keydown', e=>{
 });
 
 // ── drawing ──────────────────────────────────────────────────────────────────
-function drawRoad(){
-  // grass base (Prison Architect green)
-  ctx.fillStyle='#3a5e2a'; ctx.fillRect(0,0,W,H);
-  // grass tile pattern
-  ctx.fillStyle='rgba(0,0,0,0.06)';
-  for(let y=0;y<H;y+=10) for(let x=(y/10|0)%2*5;x<W;x+=10) ctx.fillRect(x,y,5,5);
-  // grass speckle
-  ctx.fillStyle='rgba(80,140,60,0.25)';
-  for(let i=0;i<120;i++) ctx.fillRect((Math.sin(i*7.13)*W+W)%W|0, (Math.cos(i*3.31)*H+H)%H|0, 2,2);
+// apply the iso transform to a context (rotate 45° + squash Y)
+function isoTransform(g){
+  g.translate(CX,CY);
+  g.transform(ICOS, ISIN*ISO_TILT, -ISIN, ICOS*ISO_TILT, 0, 0);
+  g.translate(-CX,-CY);
+}
 
-  // sidewalk corners (concrete tiles, prison-architect-y)
+// static ground baked once into an offscreen canvas (cheap to blit each frame)
+let groundCanvas = null;
+function bakeGround(){
+  groundCanvas = document.createElement('canvas');
+  groundCanvas.width = W; groundCanvas.height = H;
+  const g = groundCanvas.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.fillStyle='#3a5e2a'; g.fillRect(0,0,W,H);   // grass outside the diamond
+  g.save(); isoTransform(g);
+  const E=360, X0=-E, Y0=-E, X1=W+E, Y1=H+E;     // extend the plane past the field
+  // extended grass + tile speckle
+  g.fillStyle='#3a5e2a'; g.fillRect(X0,Y0,X1-X0,Y1-Y0);
+  g.fillStyle='rgba(0,0,0,0.06)';
+  for(let y=Y0;y<Y1;y+=10) for(let x=X0+(((y/10)|0)%2)*5;x<X1;x+=10) g.fillRect(x,y,5,5);
+  // sidewalk corners (extended)
+  const TS=14;
   const corners=[
-    [0,0,IX1-CROSS_W,IY1-CROSS_W],
-    [IX2+CROSS_W,0,W-IX2-CROSS_W,IY1-CROSS_W],
-    [0,IY2+CROSS_W,IX1-CROSS_W,H-IY2-CROSS_W],
-    [IX2+CROSS_W,IY2+CROSS_W,W-IX2-CROSS_W,H-IY2-CROSS_W],
+    [X0,Y0, IX1-CROSS_W-X0, IY1-CROSS_W-Y0],
+    [IX2+CROSS_W,Y0, X1-(IX2+CROSS_W), IY1-CROSS_W-Y0],
+    [X0,IY2+CROSS_W, IX1-CROSS_W-X0, Y1-(IY2+CROSS_W)],
+    [IX2+CROSS_W,IY2+CROSS_W, X1-(IX2+CROSS_W), Y1-(IY2+CROSS_W)],
   ];
   corners.forEach(([x,y,w,h])=>{
-    // base
-    ctx.fillStyle='#9a9286'; ctx.fillRect(x,y,w,h);
-    // tile grout lines
-    ctx.strokeStyle='rgba(0,0,0,0.18)'; ctx.lineWidth=1;
-    const TS=14;
-    for(let gx=x; gx<x+w; gx+=TS){ ctx.beginPath(); ctx.moveTo(gx,y); ctx.lineTo(gx,y+h); ctx.stroke(); }
-    for(let gy=y; gy<y+h; gy+=TS){ ctx.beginPath(); ctx.moveTo(x,gy); ctx.lineTo(x+w,gy); ctx.stroke(); }
-    // subtle tile shading per tile (alternating)
-    for(let gy=y; gy<y+h; gy+=TS){
-      for(let gx=x; gx<x+w; gx+=TS){
-        const cell = ((gx/TS|0)+(gy/TS|0))%2;
-        ctx.fillStyle = cell ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
-        ctx.fillRect(gx,gy,TS,TS);
-      }
-    }
-    // kerb (inner edge) bold dark stroke
-    ctx.strokeStyle='rgba(0,0,0,0.45)'; ctx.lineWidth=2;
-    ctx.strokeRect(x+1,y+1,w-2,h-2);
+    g.fillStyle='#9a9286'; g.fillRect(x,y,w,h);
+    g.strokeStyle='rgba(0,0,0,0.18)'; g.lineWidth=1;
+    for(let gx=x; gx<x+w; gx+=TS){ g.beginPath(); g.moveTo(gx,y); g.lineTo(gx,y+h); g.stroke(); }
+    for(let gy=y; gy<y+h; gy+=TS){ g.beginPath(); g.moveTo(x,gy); g.lineTo(x+w,gy); g.stroke(); }
+    g.strokeStyle='rgba(0,0,0,0.45)'; g.lineWidth=2; g.strokeRect(x+1,y+1,w-2,h-2);
   });
-
-  // road asphalt
-  ctx.fillStyle='#2a2a2c';
-  ctx.fillRect(IX1,0,ROAD_W,H);
-  ctx.fillRect(0,IY1,W,ROAD_W);
-  // road grain (chunky speckle)
-  ctx.fillStyle='rgba(255,255,255,0.025)';
-  for(let i=0;i<80;i++){
-    const rx = (Math.sin(i*1.7)*0.5+0.5);
-    const ry = (Math.cos(i*2.3)*0.5+0.5);
-    if(rx*W>IX1 && rx*W<IX2){ ctx.fillRect((rx*W)|0, (ry*H)|0, 2,2); }
-    else if(ry*H>IY1 && ry*H<IY2){ ctx.fillRect((rx*W)|0, (ry*H)|0, 2,2); }
-  }
-
-  // intersection box (slightly darker)
-  ctx.fillStyle='#262628'; ctx.fillRect(IX1,IY1,ROAD_W,ROAD_W);
-  // intersection "yield" tile pattern (very subtle)
-  ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=1;
-  for(let gx=IX1; gx<=IX2; gx+=22){ ctx.beginPath(); ctx.moveTo(gx,IY1); ctx.lineTo(gx,IY2); ctx.stroke(); }
-  for(let gy=IY1; gy<=IY2; gy+=22){ ctx.beginPath(); ctx.moveTo(IX1,gy); ctx.lineTo(IX2,gy); ctx.stroke(); }
-
-  // center double yellow lines (Crossy Road bold)
-  ctx.strokeStyle='#f0c020'; ctx.lineWidth=2.5; ctx.setLineDash([]);
-  ctx.beginPath(); ctx.moveTo(CX-2.5,0); ctx.lineTo(CX-2.5,IY1); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(CX+2.5,0); ctx.lineTo(CX+2.5,IY1); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(CX-2.5,IY2); ctx.lineTo(CX-2.5,H); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(CX+2.5,IY2); ctx.lineTo(CX+2.5,H); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0,CY-2.5); ctx.lineTo(IX1,CY-2.5); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(0,CY+2.5); ctx.lineTo(IX1,CY+2.5); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(IX2,CY-2.5); ctx.lineTo(W,CY-2.5); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(IX2,CY+2.5); ctx.lineTo(W,CY+2.5); ctx.stroke();
-
-  // road edge lines
-  ctx.strokeStyle='rgba(255,255,255,0.22)'; ctx.lineWidth=2;
-  [IX1,IX2].forEach(x=>{ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,IY1); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x,IY2); ctx.lineTo(x,H); ctx.stroke(); });
-  [IY1,IY2].forEach(y=>{ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(IX1,y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(IX2,y); ctx.lineTo(W,y); ctx.stroke(); });
-
+  // roads (extended)
+  g.fillStyle='#2a2a2c';
+  g.fillRect(IX1,Y0,ROAD_W,Y1-Y0);
+  g.fillRect(X0,IY1,X1-X0,ROAD_W);
+  g.fillStyle='#262628'; g.fillRect(IX1,IY1,ROAD_W,ROAD_W);
+  // center double yellow lines (extended)
+  g.strokeStyle='#f0c020'; g.lineWidth=2.5;
+  g.beginPath(); g.moveTo(CX-2.5,Y0); g.lineTo(CX-2.5,IY1); g.stroke();
+  g.beginPath(); g.moveTo(CX+2.5,Y0); g.lineTo(CX+2.5,IY1); g.stroke();
+  g.beginPath(); g.moveTo(CX-2.5,IY2); g.lineTo(CX-2.5,Y1); g.stroke();
+  g.beginPath(); g.moveTo(CX+2.5,IY2); g.lineTo(CX+2.5,Y1); g.stroke();
+  g.beginPath(); g.moveTo(X0,CY-2.5); g.lineTo(IX1,CY-2.5); g.stroke();
+  g.beginPath(); g.moveTo(X0,CY+2.5); g.lineTo(IX1,CY+2.5); g.stroke();
+  g.beginPath(); g.moveTo(IX2,CY-2.5); g.lineTo(X1,CY-2.5); g.stroke();
+  g.beginPath(); g.moveTo(IX2,CY+2.5); g.lineTo(X1,CY+2.5); g.stroke();
+  // road edge lines (extended)
+  g.strokeStyle='rgba(255,255,255,0.22)'; g.lineWidth=2;
+  [IX1,IX2].forEach(x=>{ g.beginPath(); g.moveTo(x,Y0); g.lineTo(x,IY1); g.stroke(); g.beginPath(); g.moveTo(x,IY2); g.lineTo(x,Y1); g.stroke(); });
+  [IY1,IY2].forEach(y=>{ g.beginPath(); g.moveTo(X0,y); g.lineTo(IX1,y); g.stroke(); g.beginPath(); g.moveTo(IX2,y); g.lineTo(X1,y); g.stroke(); });
   // stop lines
-  ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=5; ctx.setLineDash([]);
-  ctx.beginPath(); ctx.moveTo(IX1,IY1-CROSS_W-4); ctx.lineTo(CX,IY1-CROSS_W-4); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(CX,IY2+CROSS_W+4); ctx.lineTo(IX2,IY2+CROSS_W+4); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(IX1-CROSS_W-4,IY1); ctx.lineTo(IX1-CROSS_W-4,CY); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(IX2+CROSS_W+4,CY); ctx.lineTo(IX2+CROSS_W+4,IY2); ctx.stroke();
-
+  g.strokeStyle='rgba(255,255,255,0.85)'; g.lineWidth=5;
+  g.beginPath(); g.moveTo(IX1,IY1-CROSS_W-4); g.lineTo(CX,IY1-CROSS_W-4); g.stroke();
+  g.beginPath(); g.moveTo(CX,IY2+CROSS_W+4); g.lineTo(IX2,IY2+CROSS_W+4); g.stroke();
+  g.beginPath(); g.moveTo(IX1-CROSS_W-4,IY1); g.lineTo(IX1-CROSS_W-4,CY); g.stroke();
+  g.beginPath(); g.moveTo(IX2+CROSS_W+4,CY); g.lineTo(IX2+CROSS_W+4,IY2); g.stroke();
   // manholes
   DECOR.manholes.forEach(m=>{
-    ctx.fillStyle='#1a1a1a'; ctx.beginPath(); ctx.arc(m.x,m.y,6,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='rgba(255,255,255,0.15)'; ctx.lineWidth=1;
-    for(let r=2;r<=5;r+=1.5){ ctx.beginPath(); ctx.arc(m.x,m.y,r,0,Math.PI*2); ctx.stroke(); }
+    g.fillStyle='#1a1a1a'; g.beginPath(); g.arc(m.x,m.y,6,0,Math.PI*2); g.fill();
+    g.strokeStyle='rgba(255,255,255,0.15)'; g.lineWidth=1;
+    for(let r=2;r<=5;r+=1.5){ g.beginPath(); g.arc(m.x,m.y,r,0,Math.PI*2); g.stroke(); }
   });
+  g.restore();
+}
 
-  // crosswalks
-  drawCW('top'); drawCW('bottom'); drawCW('left'); drawCW('right');
+function drawRoad(){
+  if(!groundCanvas) bakeGround();
+  ctx.drawImage(groundCanvas,0,0);
+  // dynamic crosswalk stripes (color depends on open/closed) in iso space
+  ctx.save(); isoTransform(ctx);
+  drawCWStripes('top'); drawCWStripes('bottom'); drawCWStripes('left'); drawCWStripes('right');
+  ctx.restore();
+  // crosswalk signal posts in screen space (projected, drawn upright)
+  drawCWSignal('top'); drawCWSignal('bottom'); drawCWSignal('left'); drawCWSignal('right');
 }
 
 function drawDecor(){
-  // trees on grass corners (chunky low-poly)
+  // trees on grass corners (chunky low-poly) — projected, drawn upright
   DECOR.trees.forEach(t=>{
+    const [px,py]=project(t.x,t.y);
+    ctx.save(); ctx.translate(px-t.x, py-t.y);
     // shadow
     ctx.fillStyle='rgba(0,0,0,0.35)';
     ctx.beginPath(); ctx.ellipse(t.x+3, t.y+t.r-1, t.r+1, (t.r+1)*0.35, 0, 0, Math.PI*2); ctx.fill();
@@ -838,9 +852,12 @@ function drawDecor(){
     // highlight
     ctx.fillStyle='rgba(255,255,255,0.18)';
     ctx.beginPath(); ctx.arc(t.x+t.r*0.4, t.y-t.r*0.9, t.r*0.25, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
   });
-  // street lights (corner posts) — drawn after road so they sit on sidewalk
+  // street lights (corner posts) — projected, drawn upright
   DECOR.lights.forEach(l=>{
+    const [px,py]=project(l.x,l.y);
+    ctx.save(); ctx.translate(px-l.x, py-l.y);
     // shadow
     ctx.fillStyle='rgba(0,0,0,0.25)';
     ctx.beginPath(); ctx.ellipse(l.x+2, l.y+1, 5, 2, 0, 0, Math.PI*2); ctx.fill();
@@ -855,40 +872,40 @@ function drawDecor(){
     ctx.shadowColor='rgba(255,210,100,0.6)'; ctx.shadowBlur=6;
     ctx.beginPath(); ctx.arc(l.x, l.y-13.5, 1.4, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur=0;
+    ctx.restore();
   });
 }
 
-function drawCW(side){
+// crosswalk stripes — drawn flat on the ground (inside iso transform)
+function drawCWStripes(side){
   const zone=CW[side];
   const open=state.cwOpen[side];
   const horiz=side==='top'||side==='bottom';
   const n=6;
-  const stripeColor = open ? 'rgba(120,230,120,0.85)' : 'rgba(245,245,240,0.7)';
+  ctx.fillStyle = open ? 'rgba(120,230,120,0.85)' : 'rgba(245,245,240,0.7)';
   for(let s=0;s<n;s++){
-    ctx.fillStyle=stripeColor;
     if(horiz){ const sw=zone.w/(n*2-1); ctx.fillRect(zone.x+s*sw*2,zone.y,sw,zone.h); }
     else     { const sh=zone.h/(n*2-1); ctx.fillRect(zone.x,zone.y+s*sh*2,zone.w,sh); }
   }
-  if(open){
-    ctx.fillStyle='rgba(60,200,60,0.14)';
-    ctx.fillRect(zone.x,zone.y,zone.w,zone.h);
-  }
-  // signal box
-  let sx,sy;
-  if(side==='top')    { sx=IX1-14; sy=IY1-CROSS_W/2; }
-  if(side==='bottom') { sx=IX2+14; sy=IY2+CROSS_W/2; }
-  if(side==='left')   { sx=IX1-CROSS_W/2; sy=IY1-14; }
-  if(side==='right')  { sx=IX2+CROSS_W/2; sy=IY2+14; }
-  // box
+  if(open){ ctx.fillStyle='rgba(60,200,60,0.14)'; ctx.fillRect(zone.x,zone.y,zone.w,zone.h); }
+}
+
+// crosswalk signal — drawn upright in screen space at the projected corner
+function drawCWSignal(side){
+  const open=state.cwOpen[side];
+  let wx,wy;
+  if(side==='top')    { wx=IX1-14; wy=IY1-CROSS_W/2; }
+  if(side==='bottom') { wx=IX2+14; wy=IY2+CROSS_W/2; }
+  if(side==='left')   { wx=IX1-CROSS_W/2; wy=IY1-14; }
+  if(side==='right')  { wx=IX2+CROSS_W/2; wy=IY2+14; }
+  const [sx,sy]=project(wx,wy);
   ctx.fillStyle='#1a1a1a';
   ctx.beginPath(); ctx.roundRect(sx-8,sy-9,16,18,3); ctx.fill();
   const pulse = open ? (0.6+0.4*Math.sin(tick*0.12)) : 0.7;
-  // walk symbol
   ctx.fillStyle = open ? `rgba(80,230,100,${pulse})` : `rgba(80,50,50,0.6)`;
   ctx.beginPath(); ctx.arc(sx,sy-3,3.2,0,Math.PI*2); ctx.fill();
   ctx.fillStyle = open ? `rgba(80,50,50,0.5)` : `rgba(230,60,60,${pulse})`;
   ctx.fillRect(sx-2.5, sy+2, 5, 4);
-  // tap hint
   if(tick%80 < 40){
     ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.font='bold 6px DM Sans'; ctx.textAlign='center';
     ctx.fillText('TAP', sx, sy+13);
@@ -899,6 +916,7 @@ function drawCW(side){
 const DIR_SUFFIX = { north:'n', south:'s', east:'e', west:'w' };
 const SPRITE_SIZE = { car:30, sport:30, tractor:36, reckless:30 };
 function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckless=false,stackKey=null){
+  [cx,cy] = project(cx,cy);   // world → screen; sprites drawn upright from here
   // ── sprite-stack path (SpriteStack voxel cars, baked per direction) ──
   const sk = stackKey && Assets.stacks[stackKey];
   if(sk){
@@ -949,7 +967,7 @@ function drawCar(cx,cy,dir,color,vtype='car',waitTime=0,mood=0,ghost=false,reckl
 
   ctx.save();
   ctx.translate(cx,cy);
-  ctx.rotate(CAR_ROT[dir]);
+  ctx.rotate(ISO_BAKE[dir]);
   if(ghost) ctx.globalAlpha=0.5;
   const tpl = VEHICLES[vtype] || VEHICLES.car;
   const cw = tpl.w, ch = tpl.h;
@@ -1115,7 +1133,9 @@ function drawTypeBadge(x, y, label, bg, fg){
   ctx.fillText(label, x, y+1);
 }
 
-function drawPatienceBar(x, y, frac){
+function drawPatienceBar(wx, wy, frac){
+  const p = project(wx, wy);
+  const x = p[0], y = p[1] - 26;   // float the bar above the car in screen space
   const w = 22, h = 4;
   // outline
   ctx.fillStyle='rgba(0,0,0,0.65)';
@@ -1145,14 +1165,10 @@ function drawPatienceBar(x, y, frac){
 function drawSwipeArrow(cx,cy,dir){
   const hints={north:'tap / ↑',south:'tap / ↓',east:'tap / →',west:'tap / ←'};
   const pulse=0.55+0.45*Math.sin(tick*0.14);
+  const [sx,sy]=project(cx,cy);
   ctx.fillStyle=`rgba(255,255,255,${pulse*0.7})`;
   ctx.font='bold 10px DM Sans'; ctx.textAlign='center';
-  let hx=cx,hy=cy;
-  if(dir==='north'){ hy=cy+26; }
-  if(dir==='south'){ hy=cy-20; }
-  if(dir==='east') { hx=cx-38; hy=cy+4; }
-  if(dir==='west') { hx=cx+38; hy=cy+4; }
-  ctx.fillText(hints[dir], hx, hy);
+  ctx.fillText(hints[dir], sx, sy+30);   // below the car in screen space
 }
 
 function drawQueues(){
@@ -1166,8 +1182,8 @@ function drawQueues(){
       if(dir==='east')  cx -= i*CAR_GAP;
       if(dir==='west')  cx += i*CAR_GAP;
       drawCar(cx,cy,dir,c.color,c.vtype,c.waitTime,c.mood,i>0,false,c.stackKey);
-      drawPatienceBar(cx, cy - 20, c.waitTime / c.patience);
-      if(i===0) drawSwipeArrow(cx,cy+8,dir);
+      drawPatienceBar(cx, cy, c.waitTime / c.patience);
+      if(i===0) drawSwipeArrow(cx,cy,dir);
     });
   });
 }
@@ -1176,21 +1192,6 @@ function drawApproaching(){
   state.approaching.forEach(a=>{
     if(a.done) return;
     drawCar(a.x,a.y,a.dir,a.color,a.vtype,0,0,false,false,a.stackKey);
-    // headlight cone hint when approaching
-    const ang = CAR_ROT[a.dir];
-    ctx.save(); ctx.translate(a.x,a.y); ctx.rotate(ang);
-    const tpl = VEHICLES[a.vtype]||VEHICLES.car;
-    const grad = ctx.createLinearGradient(0,tpl.h/2, 0, tpl.h/2+30);
-    grad.addColorStop(0,'rgba(255,240,180,0.25)');
-    grad.addColorStop(1,'rgba(255,240,180,0)');
-    ctx.fillStyle=grad;
-    ctx.beginPath();
-    ctx.moveTo(-tpl.w+1, tpl.h/2);
-    ctx.lineTo(tpl.w-1, tpl.h/2);
-    ctx.lineTo(tpl.w+6, tpl.h/2+30);
-    ctx.lineTo(-tpl.w-6, tpl.h/2+30);
-    ctx.closePath(); ctx.fill();
-    ctx.restore();
   });
 }
 
@@ -1200,8 +1201,9 @@ function drawMoving(){
     if((m.reckless||m.vtype==='sport') && m.trail.length>2){
       const col = m.vtype==='sport' ? 'rgba(255,200,80,0.25)' : 'rgba(255,80,80,0.25)';
       ctx.strokeStyle=col; ctx.lineWidth=4; ctx.lineCap='round';
-      ctx.beginPath(); ctx.moveTo(m.trail[0].x,m.trail[0].y);
-      m.trail.forEach(p=>ctx.lineTo(p.x,p.y)); ctx.stroke();
+      const t0=project(m.trail[0].x,m.trail[0].y);
+      ctx.beginPath(); ctx.moveTo(t0[0],t0[1]);
+      m.trail.forEach(p=>{ const pp=project(p.x,p.y); ctx.lineTo(pp[0],pp[1]); }); ctx.stroke();
     }
     drawCar(m.x,m.y,m.dir,m.color,m.vtype,0,0,false,m.reckless,m.stackKey);
   });
@@ -1209,6 +1211,7 @@ function drawMoving(){
 
 // chunky tile pedestrian
 function drawPed(x,y,p,walking,panic=0){
+  [x,y] = project(x,y);   // world → screen; peds drawn upright
   // sprite path: draw the ped PNG upright (peds don't rotate) and bail
   if(Assets.has('ped')){
     ctx.fillStyle='rgba(0,0,0,0.32)';
@@ -1300,19 +1303,20 @@ function drawPeds(){
 
 function drawCop(){
   const st=Math.min(1,cop.mood/3);
+  const [copx,copy]=project(cop.x,cop.y);
   // sprite path: chibi cop PNG, rotated to face the direction being waved through
   if(Assets.has('cop')){
     ctx.fillStyle='rgba(0,0,0,0.4)';
-    ctx.beginPath(); ctx.ellipse(cop.x,cop.y+17,12,5,0,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(copx,copy+17,12,5,0,0,Math.PI*2); ctx.fill();
     const s = 48;
-    drawSprite('cop', cop.x, cop.y, cop.angle, s, s);
+    drawSprite('cop', copx, copy, cop.angle, s, s);
     const ml=['😎 Chill','🙂 Busy','😰 Stressed','🤯 Chaos!'];
     ctx.fillStyle=`rgba(255,255,255,${0.4+st*0.6})`;
     ctx.font=`${11+st*2}px DM Sans`; ctx.textAlign='center';
-    ctx.fillText(ml[Math.min(3,Math.floor(cop.mood))], cop.x, cop.y-50);
+    ctx.fillText(ml[Math.min(3,Math.floor(cop.mood))], copx, copy-50);
     return;
   }
-  ctx.save(); ctx.translate(cop.x,cop.y); ctx.rotate(cop.angle);
+  ctx.save(); ctx.translate(copx,copy); ctx.rotate(cop.angle);
 
   // shadow
   ctx.fillStyle='rgba(0,0,0,0.4)';
@@ -1414,22 +1418,23 @@ function drawCop(){
   const ml=['😎 Chill','🙂 Busy','😰 Stressed','🤯 Chaos!'];
   ctx.fillStyle=`rgba(255,255,255,${0.4+st*0.6})`;
   ctx.font=`${11+st*2}px DM Sans`; ctx.textAlign='center';
-  ctx.fillText(ml[Math.min(3,Math.floor(cop.mood))], cop.x, cop.y-50);
+  ctx.fillText(ml[Math.min(3,Math.floor(cop.mood))], copx, copy-50);
 }
 
 function drawSwipeTrail(){
   if(!ptrStart||!ptrCur||!swipedCar) return;
-  const dx=ptrCur.x-ptrStart.x, dy=ptrCur.y-ptrStart.y;
+  const ax=ptrStart.sx, ay=ptrStart.sy, bx=ptrCur.sx, by=ptrCur.sy; // screen-space
+  const dx=bx-ax, dy=by-ay;
   if(Math.hypot(dx,dy)<8) return;
-  const grad=ctx.createLinearGradient(ptrStart.x,ptrStart.y,ptrCur.x,ptrCur.y);
+  const grad=ctx.createLinearGradient(ax,ay,bx,by);
   grad.addColorStop(0,'rgba(255,255,255,0)');
   grad.addColorStop(1,'rgba(255,255,255,0.6)');
   ctx.strokeStyle=grad; ctx.lineWidth=3; ctx.lineCap='round'; ctx.setLineDash([6,4]);
-  ctx.beginPath(); ctx.moveTo(ptrStart.x,ptrStart.y); ctx.lineTo(ptrCur.x,ptrCur.y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
   ctx.setLineDash([]);
   const angle=Math.atan2(dy,dx);
   ctx.fillStyle='rgba(255,255,255,0.7)';
-  ctx.save(); ctx.translate(ptrCur.x,ptrCur.y); ctx.rotate(angle);
+  ctx.save(); ctx.translate(bx,by); ctx.rotate(angle);
   ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-12,5); ctx.lineTo(-12,-5); ctx.closePath(); ctx.fill();
   ctx.restore();
 }
@@ -1437,14 +1442,15 @@ function drawSwipeTrail(){
 function drawEffects(){
   state.effects.forEach(e=>{
     const a=e.life/e.maxLife;
+    const [ex,ey]=project(e.x,e.y);
     if(e.puff){
       ctx.globalAlpha=a*0.8;
       ctx.fillStyle=e.col;
-      ctx.beginPath(); ctx.arc(e.x,e.y,e.r,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex,ey,e.r,0,Math.PI*2); ctx.fill();
     } else {
       ctx.globalAlpha=a;
       ctx.font=`${16+((1-a)*8)}px sans-serif`; ctx.textAlign='center';
-      ctx.fillText(e.emoji, e.x, e.y-((1-a)*20));
+      ctx.fillText(e.emoji, ex, ey-((1-a)*20));
     }
   });
   ctx.globalAlpha=1;
